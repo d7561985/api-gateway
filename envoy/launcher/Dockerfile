@@ -2,9 +2,9 @@
 FROM golang:1.20-alpine as build
 WORKDIR /app/conf-generator
 RUN apk add git
-COPY api-config/go.mod .
+COPY go.mod .
 RUN go mod download
-COPY ./api-config ./
+COPY ./ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o conf-generator .
 
 FROM auth-adapter:latest as auth-adapter
