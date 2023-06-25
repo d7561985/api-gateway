@@ -1,0 +1,15 @@
+api_route: /api/
+
+apis:
+  - name: FakeService
+    auth: {policy: no-need}
+    cluster: web
+    methods:
+      - name: Handle
+        auth:
+          policy: no-need
+          rate_limit: {period: "1m", count: 3, delay: "3s"}
+
+clusters:
+  - name: web
+    addr: "web:9091"

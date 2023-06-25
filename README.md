@@ -16,3 +16,9 @@ Research project where we could try make declarative API-Gateway for grpc micros
 
 ### Consul
 https://github.com/hashicorp/learn-consul-service-mesh/tree/main
+
+# APPENDIX
+* https://github.com/grpc/grpc-web
+* https://github.com/fullstorydev/grpcurl
+* https://github.com/improbable-eng/grpc-web/tree/master/integration_test
+* https://github.com/nfrankel/opentelemetry-tracing

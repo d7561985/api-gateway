@@ -47,12 +47,14 @@ func main() {
 			grpclog.Fatalf("failed to listen: %v", err)
 		}
 
-		s, err := NewServer(&logg, os.Getenv("AUTH_SERVICE_ADDR"), authCfg, parseRCConf())
-		if err != nil {
-			panic(err)
-		}
+		if authAddr := os.Getenv("AUTH_SERVICE_ADDR"); authAddr != "" {
+			s, err := NewServer(&logg, os.Getenv("AUTH_SERVICE_ADDR"), authCfg, parseRCConf())
+			if err != nil {
+				panic(err)
+			}
 
-		RegisterAuthorizationServer(grpcServer, s)
+			RegisterAuthorizationServer(grpcServer, s)
+		}
 
 		logg.Info("gRPC service started at :9000")
 		err = grpcServer.Serve(listener)

@@ -1,0 +1,45 @@
+version: "3.3"
+services:
+  auth-adapter:
+    image: auth-adapter
+    build:
+      dockerfile: Dockerfile
+      context: auth-adapter
+    environment:
+      OTEL_ENABLE: false
+    volumes:
+      - "./config.yaml:/opt/auth-adapter/config.yaml"
+#    ports:
+#      - "9000:9000"
+    network_mode: "service:launcher"
+  launcher:
+    image: launcher
+    build:
+      dockerfile: Dockerfile
+      context: launcher
+    volumes:
+      - "./config.yaml:/opt/auth-adapter/config.yaml"
+    ports:
+      - "8080:8080"
+      - "8000:8000"
+    environment:
+      AUTH_ADAPTER_HOST: 127.0.0.1
+    networks:
+      private:
+  web:
+    image: nicholasjackson/fake-service:v0.19.1
+    environment:
+      LISTEN_ADDR: 0.0.0.0:9091
+      #UPSTREAM_URIS: "grpc://localhost:9092"
+      MESSAGE: "Hello World"
+      NAME: "web"
+      SERVER_TYPE: "grpc"
+    ports:
+      - "9091:9091"
+    networks:
+      private:
+
+networks:
+  private:
+    driver: bridge
+

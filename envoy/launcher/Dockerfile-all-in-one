@@ -7,6 +7,8 @@ RUN go mod download
 COPY ./ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o conf-generator .
 
+FROM auth-adapter:latest as auth-adapter
+
 ### main stage
 FROM envoyproxy/envoy:v1.12.2
 
@@ -16,6 +18,7 @@ RUN apt-get update && apt-get install -y curl gettext-base && apt-get clean && r
 RUN curl -Lo /usr/local/lib/libjaegertracing_plugin.so https://github.com/jaegertracing/jaeger-client-cpp/releases/download/v0.4.2/libjaegertracing_plugin.linux_amd64.so
 
 COPY entrypoint.sh /
+COPY --from=auth-adapter  /app/auth-adapter/auth-adapter /opt/auth-adapter/auth-adapter
 COPY --from=build  /app/conf-generator/conf-generator /opt/conf-generator/conf-generator
 
 ENTRYPOINT ["/entrypoint.sh"]

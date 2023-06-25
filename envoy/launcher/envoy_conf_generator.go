@@ -72,7 +72,7 @@ static_resources:
     type: static
     http2_protocol_options: {}
     lb_policy: round_robin
-    hosts: [{ socket_address: { address: 127.0.0.1, port_value: 9000 }}]
+    hosts: [{ socket_address: { address: {{.AuthAdapterHost}}, port_value: 9000 }}]
 {{.Clusters}}
 `))
 )
@@ -113,12 +113,19 @@ func GenerateEnvoyConfig(cfg *APIConf, outFile string) error {
 	}
 
 	tmplData := struct {
-		Routes   string
-		Clusters string
+		Routes          string
+		Clusters        string
+		AuthAdapterHost string
 	}{
-		Routes:   string(routesBuf.Bytes()),
-		Clusters: string(clustersBuf.Bytes()),
+		Routes:          string(routesBuf.Bytes()),
+		Clusters:        string(clustersBuf.Bytes()),
+		AuthAdapterHost: "127.0.0.1",
 	}
+
+	if authAdapterHost := os.Getenv("AUTH_ADAPTER_HOST"); authAdapterHost != "" {
+		tmplData.AuthAdapterHost = authAdapterHost
+	}
+
 	outF, err := os.Create(outFile)
 	if err != nil {
 		return err
