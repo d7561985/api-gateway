@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"envoy.auth/extAuth"
-	wrappers "github.com/gogo/protobuf/types"
+	"github.com/golang/protobuf/ptypes/wrappers"
 	grpcx "github.com/tel-io/instrumentation/middleware/grpc"
 	"github.com/tel-io/tel/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -15,6 +15,13 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	code1 "google.golang.org/genproto/googleapis/rpc/code"
+	status1 "google.golang.org/genproto/googleapis/rpc/status"
+
+	envoy_api_v3_core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	v3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 )
 
 type server struct {
@@ -28,6 +35,8 @@ type server struct {
 
 	rateLimitManager *RateLimitManager
 }
+
+var _ envoy_service_auth_v3.AuthorizationServer = &server{}
 
 func NewServer(logger *tel.Telemetry, extAuthAddr string, authCfg *APIConf, rcConf *RCConf) (*server, error) {
 	conn, err := grpc.Dial(
@@ -73,18 +82,18 @@ func (s *server) Close() error {
 	return s.conn.Close()
 }
 
-func formCheckResponse(code StatusCode, message string, headers []*HeaderValueOption) *CheckResponse {
-	resp := &CheckResponse{
-		Status: &RPCStatus{Code: int32(code), Message: message},
+func formCheckResponse(code v3.StatusCode, message string, headers []*envoy_api_v3_core.HeaderValueOption) *envoy_service_auth_v3.CheckResponse {
+	resp := &envoy_service_auth_v3.CheckResponse{
+		Status: &status1.Status{Code: int32(code1.Code_OK), Message: message},
 	}
 	if code == 0 {
-		resp.HttpResponse = &CheckResponse_OkResponse{
-			OkResponse: &OkHttpResponse{Headers: headers},
+		resp.HttpResponse = &envoy_service_auth_v3.CheckResponse_OkResponse{
+			OkResponse: &envoy_service_auth_v3.OkHttpResponse{Headers: headers},
 		}
 	} else {
-		resp.HttpResponse = &CheckResponse_DeniedResponse{
-			DeniedResponse: &DeniedHttpResponse{
-				Status:  &HttpStatus{Code: code},
+		resp.HttpResponse = &envoy_service_auth_v3.CheckResponse_DeniedResponse{
+			DeniedResponse: &envoy_service_auth_v3.DeniedHttpResponse{
+				Status:  &v3.HttpStatus{Code: code},
 				Headers: headers,
 			},
 		}
@@ -93,7 +102,7 @@ func formCheckResponse(code StatusCode, message string, headers []*HeaderValueOp
 	return resp
 }
 
-func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, error) {
+func (s *server) Check(ctx context.Context, in *envoy_service_auth_v3.CheckRequest) (*envoy_service_auth_v3.CheckResponse, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		s.logger.Warn("cant receive gRPC metadata")
@@ -108,7 +117,7 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 	span, ccx := tel.StartSpanFromContext(ctx, "check-auth")
 	defer span.End()
 
-	respHeaders := []*HeaderValueOption{}
+	respHeaders := []*envoy_api_v3_core.HeaderValueOption{}
 	headers := in.Attributes.Request.Http.Headers
 	path, ok := headers[":path"]
 	if !ok {
@@ -118,7 +127,7 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 
 	service, method := parsePath(path)
 	if service == "" || method == "" {
-		return formCheckResponse(StatusCode_BadRequest, "bad path", respHeaders), nil
+		return formCheckResponse(v3.StatusCode_BadRequest, "bad path", respHeaders), nil
 	}
 
 	span.SetAttributes(
@@ -136,7 +145,7 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 		if v2RepatchaPassed {
 			s.rateLimitManager.Reset(headers["x-real-ip"], method)
 		} else {
-			return formCheckResponse(StatusCode_TooManyRequests, "rate limit is reached", respHeaders), nil
+			return formCheckResponse(v3.StatusCode_TooManyRequests, "rate limit is reached", respHeaders), nil
 		}
 	}
 
@@ -145,12 +154,12 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 		tel.String("method", path), tel.Any("permissions", reqPermission))
 
 	if reqPermission == nil {
-		return formCheckResponse(StatusCode_BadRequest, "unknown auth for method", respHeaders), nil
+		return formCheckResponse(v3.StatusCode_BadRequest, "unknown auth for method", respHeaders), nil
 	}
 
 	if !v2RepatchaPassed && reqPermission.NeedReCaptcha() {
 		if !s.checkReCaptcha(headers, false /*v2*/) {
-			return formCheckResponse(StatusCode_PreconditionFailed, "", respHeaders), nil
+			return formCheckResponse(v3.StatusCode_PreconditionFailed, "", respHeaders), nil
 		}
 	}
 	if reqPermission.NoNeed() {
@@ -160,7 +169,7 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 	token, err := parseTokenCookie(headers["cookie"])
 	s.logger.Debug("token", tel.String("token", token), tel.Error(err))
 	if err != nil {
-		return formCheckResponse(StatusCode_BadRequest, err.Error(), respHeaders), nil
+		return formCheckResponse(v3.StatusCode_BadRequest, err.Error(), respHeaders), nil
 	}
 
 	if token == "" && reqPermission.Optional() {
@@ -180,8 +189,8 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 	s.logger.Debug("AuthService", tel.Any("response", resp), tel.Error(err))
 
 	if err != nil {
-		respHeaders = append(respHeaders, &HeaderValueOption{
-			Header: &HeaderValue{Key: "set-cookie", Value: "token=; Path=/; Max-Age=0; HttpOnly"},
+		respHeaders = append(respHeaders, &envoy_api_v3_core.HeaderValueOption{
+			Header: &envoy_api_v3_core.HeaderValue{Key: "set-cookie", Value: "token=; Path=/; Max-Age=0; HttpOnly"},
 			Append: &wrappers.BoolValue{Value: false},
 		})
 
@@ -189,7 +198,7 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 			return formCheckResponse(0, "", respHeaders), nil
 		}
 
-		return formCheckResponse(StatusCode_Unauthorized, err.Error(), respHeaders), nil
+		return formCheckResponse(v3.StatusCode_Unauthorized, err.Error(), respHeaders), nil
 	}
 
 	span.SetAttributes(
@@ -198,16 +207,16 @@ func (s *server) Check(ctx context.Context, in *CheckRequest) (*CheckResponse, e
 	)
 
 	if reqPermission.Required() && !authorize(reqPermission.Permission, resp.Roles) {
-		return formCheckResponse(StatusCode_Forbidden, "access denied", respHeaders), nil
+		return formCheckResponse(v3.StatusCode_Forbidden, "access denied", respHeaders), nil
 	}
 
-	respHeaders = append(respHeaders, &HeaderValueOption{
-		Header: &HeaderValue{Key: "user-id", Value: resp.UserId},
+	respHeaders = append(respHeaders, &envoy_api_v3_core.HeaderValueOption{
+		Header: &envoy_api_v3_core.HeaderValue{Key: "user-id", Value: resp.UserId},
 		Append: &wrappers.BoolValue{Value: false},
 	})
 
-	respHeaders = append(respHeaders, &HeaderValueOption{
-		Header: &HeaderValue{Key: "session-id", Value: resp.SessionId},
+	respHeaders = append(respHeaders, &envoy_api_v3_core.HeaderValueOption{
+		Header: &envoy_api_v3_core.HeaderValue{Key: "session-id", Value: resp.SessionId},
 		Append: &wrappers.BoolValue{Value: false},
 	})
 

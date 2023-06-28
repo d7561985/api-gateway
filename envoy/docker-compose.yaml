@@ -7,23 +7,30 @@ services:
       context: auth-adapter
     environment:
       OTEL_ENABLE: false
+      GRPC_GO_LOG_VERBOSITY_LEVEL: 99
+      GRPC_GO_LOG_SEVERITY_LEVEL: debug
     volumes:
       - "./config.yaml:/opt/auth-adapter/config.yaml"
-#    ports:
-#      - "9000:9000"
-    network_mode: "service:launcher"
-  launcher:
-    image: launcher
+    ports:
+      - "9000:9000"
+    networks:
+      private:
+  api-gateway:
     build:
       dockerfile: Dockerfile
       context: launcher
     volumes:
       - "./config.yaml:/opt/auth-adapter/config.yaml"
+      #- "./envoy.yaml:/etc/envoy/envoy.yaml"
+#    entrypoint: "/usr/local/bin/envoy"
+#    command: [ "-c /etc/envoy/envoy.yaml", "-l info" ]
     ports:
       - "8080:8080"
-      - "8000:8000"
     environment:
-      AUTH_ADAPTER_HOST: 127.0.0.1
+      AUTH_ADAPTER_HOST: auth-adapter
+    links:
+      - web
+      - health-demo
     networks:
       private:
   web:
@@ -36,6 +43,15 @@ services:
       SERVER_TYPE: "grpc"
     ports:
       - "9091:9091"
+    networks:
+      private:
+  health-demo:
+    image: demo-health
+    build:
+      dockerfile: Dockerfile
+      context: ../tools/health-demo
+    ports:
+      - "8081:8081"
     networks:
       private:
 

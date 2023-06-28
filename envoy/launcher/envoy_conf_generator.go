@@ -11,16 +11,27 @@ var (
               - match: { prefix: "{{.APIRoute}}{{.APIName}}" }
                 route:
                   cluster: {{.ClusterName}}
-                  max_grpc_timeout: 600s
+                  timeout: 0s
                   prefix_rewrite: "/{{.APIName}}"
+                  max_stream_duration:
+                    max_stream_duration: 600s
+                    grpc_timeout_header_max: 0s
 `))
 	envoyClusterTmpl = template.Must(template.New("clusterTmpl").Parse(`
   - name: {{.ClusterName}}
     connect_timeout: 5s
-    type: strict_dns
+    type: STRICT_DNS
     http2_protocol_options: {}
-    lb_policy: round_robin
-    hosts: [{ socket_address: { address: "{{.ClusterAddr}}", port_value: {{.ClusterPort}} }}]
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: {{.ClusterName}}
+      endpoints:
+        - lb_endpoints:
+          - endpoint:
+              address:
+                socket_address:
+                  address: "{{.ClusterAddr}}"
+                  port_value: {{.ClusterPort}}
     upstream_connection_options:
         tcp_keepalive:
             keepalive_probes: 2
@@ -41,13 +52,16 @@ static_resources:
       socket_address: { address: 0.0.0.0, port_value: 8080 }
     filter_chains:
     - filters:
-      - name: envoy.http_connection_manager
-        config:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           generate_request_id: true
-          tracing:
-            operation_name: egress
           codec_type: auto
           stat_prefix: ingress_http
+          access_log:
+            - name: envoy.access_loggers.stdout
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
           route_config:
             name: local_route
             virtual_hosts:
@@ -57,22 +71,40 @@ static_resources:
               routes:
 {{.Routes}}
           http_filters:
-          - name: envoy.ext_authz
-            config:
+          - name: envoy.filters.ext_authz
+            typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                transport_api_version: V3
                 grpc_service:
-                    envoy_grpc:
-                        cluster_name: ext_auth
-                    timeout: 30s
-          - name: envoy.grpc_web
-          - name: envoy.router
+                  timeout: 30s
+                  envoy_grpc:
+                    cluster_name: ext_auth
+          - name: envoy.filters.http.grpc_web
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_web.v3.GrpcWeb
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
   - name: ext_auth
     connect_timeout: 2s
-    type: static
-    http2_protocol_options: {}
-    lb_policy: round_robin
-    hosts: [{ socket_address: { address: {{.AuthAdapterHost}}, port_value: 9000 }}]
+    type: STRICT_DNS
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: ext_auth
+      endpoints:
+        - lb_endpoints:
+          - endpoint:
+              address:
+                socket_address:
+                  address: {{.AuthAdapterHost}}
+                  port_value: 9000
 {{.Clusters}}
 `))
 )

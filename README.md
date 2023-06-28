@@ -22,3 +22,4 @@ https://github.com/hashicorp/learn-consul-service-mesh/tree/main
 * https://github.com/fullstorydev/grpcurl
 * https://github.com/improbable-eng/grpc-web/tree/master/integration_test
 * https://github.com/nfrankel/opentelemetry-tracing
+* https://github.com/ktr0731/evans#grpc-web

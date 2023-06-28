@@ -6,10 +6,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	grpcx "github.com/tel-io/instrumentation/middleware/grpc"
 	"github.com/tel-io/tel/v2"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/grpclog"
+
+	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 )
 
 func parseRCConf() *RCConf {
@@ -39,7 +42,9 @@ func main() {
 		panic(err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(grpcx.UnaryServerInterceptor()),
+	)
 
 	go func() {
 		listener, err := net.Listen("tcp", ":9000")
@@ -47,14 +52,12 @@ func main() {
 			grpclog.Fatalf("failed to listen: %v", err)
 		}
 
-		if authAddr := os.Getenv("AUTH_SERVICE_ADDR"); authAddr != "" {
-			s, err := NewServer(&logg, os.Getenv("AUTH_SERVICE_ADDR"), authCfg, parseRCConf())
-			if err != nil {
-				panic(err)
-			}
-
-			RegisterAuthorizationServer(grpcServer, s)
+		s, err := NewServer(&logg, os.Getenv("AUTH_SERVICE_ADDR"), authCfg, parseRCConf())
+		if err != nil {
+			panic(err)
 		}
+
+		envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, s)
 
 		logg.Info("gRPC service started at :9000")
 		err = grpcServer.Serve(listener)

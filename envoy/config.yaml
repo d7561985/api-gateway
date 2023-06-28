@@ -1,4 +1,4 @@
-api_route: /api/
+api_route: /
 
 apis:
   - name: FakeService
@@ -9,7 +9,12 @@ apis:
         auth:
           policy: no-need
           rate_limit: {period: "1m", count: 3, delay: "3s"}
+  - name: grpc.health.v1.Health
+    cluster: health-demo
+    auth: {policy: no-need}
 
 clusters:
   - name: web
     addr: "web:9091"
+  - name: health-demo
+    addr: "health-demo:8081"
