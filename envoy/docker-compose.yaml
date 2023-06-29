@@ -18,7 +18,7 @@ services:
   api-gateway:
     build:
       dockerfile: Dockerfile
-      context: launcher
+      context: api-gateway
     volumes:
       - "./config.yaml:/opt/auth-adapter/config.yaml"
       #- "./envoy.yaml:/etc/envoy/envoy.yaml"
