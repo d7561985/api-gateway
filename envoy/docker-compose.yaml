@@ -7,6 +7,10 @@ services:
       context: auth-adapter
     environment:
       OTEL_ENABLE: false
+      OTEL_COLLECTOR_GRPC_ADDR: opentelemetry:4317
+      MONITOR_ENABLE: false
+      OTEL_SERVICE_NAME: auth-adapter
+      NAMESPACE: demo
       GRPC_GO_LOG_VERBOSITY_LEVEL: 99
       GRPC_GO_LOG_SEVERITY_LEVEL: debug
     volumes:
@@ -28,9 +32,7 @@ services:
       - "8080:8080"
     environment:
       AUTH_ADAPTER_HOST: auth-adapter
-    links:
-      - web
-      - health-demo
+      OPEN_TELEMETRY_HOST: opentelemetry
     networks:
       private:
   web:
@@ -52,6 +54,20 @@ services:
       context: ../tools/health-demo
     ports:
       - "8081:8081"
+    networks:
+      private:
+  opentelemetry:
+    build:
+      dockerfile: Dockerfile
+      context: ../tools/opentelemetry
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:13133 || exit 1"]
+      interval: 1s
+      timeout: 120s
+      retries: 120
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "${PORT_UI:-55679}:55679"
     networks:
       private:
 

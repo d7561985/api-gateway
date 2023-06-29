@@ -8,7 +8,7 @@ COPY ./ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o conf-generator .
 
 ### main stage
-FROM envoyproxy/envoy:v1.22.0
+FROM envoyproxy/envoy:v1.26.2
 
 ENV LOG_LEVEL info
 

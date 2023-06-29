@@ -55,6 +55,16 @@ static_resources:
       - name: envoy.filters.network.http_connection_manager
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          tracing:
+            provider:
+              name: envoy.tracers.opentelemetry
+              typed_config:
+                "@type": type.googleapis.com/envoy.config.trace.v3.OpenTelemetryConfig
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: opentelemetry_collector
+                  timeout: 0.250s
+                service_name: api-gateway
           generate_request_id: true
           codec_type: auto
           stat_prefix: ingress_http
@@ -105,6 +115,23 @@ static_resources:
                 socket_address:
                   address: {{.AuthAdapterHost}}
                   port_value: 9000
+  - name: opentelemetry_collector
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+    load_assignment:
+      cluster_name: opentelemetry_collector
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: {{.OpenTelemetryHost}}
+                port_value: {{.OpenTelemetryPort}}
 {{.Clusters}}
 `))
 )
@@ -145,17 +172,29 @@ func GenerateEnvoyConfig(cfg *APIConf, outFile string) error {
 	}
 
 	tmplData := struct {
-		Routes          string
-		Clusters        string
-		AuthAdapterHost string
+		Routes            string
+		Clusters          string
+		AuthAdapterHost   string
+		OpenTelemetryHost string
+		OpenTelemetryPort string
 	}{
-		Routes:          string(routesBuf.Bytes()),
-		Clusters:        string(clustersBuf.Bytes()),
-		AuthAdapterHost: "127.0.0.1",
+		Routes:            string(routesBuf.Bytes()),
+		Clusters:          string(clustersBuf.Bytes()),
+		AuthAdapterHost:   "127.0.0.1",
+		OpenTelemetryHost: "127.0.0.1",
+		OpenTelemetryPort: "4317",
 	}
 
 	if authAdapterHost := os.Getenv("AUTH_ADAPTER_HOST"); authAdapterHost != "" {
 		tmplData.AuthAdapterHost = authAdapterHost
+	}
+
+	if otHost := os.Getenv("OPEN_TELEMETRY_HOST"); otHost != "" {
+		tmplData.OpenTelemetryHost = otHost
+	}
+
+	if otPort := os.Getenv("OPEN_TELEMETRY_PORT"); otPort != "" {
+		tmplData.OpenTelemetryPort = otPort
 	}
 
 	outF, err := os.Create(outFile)
