@@ -13,6 +13,7 @@ Research project where we could try make declarative API-Gateway for grpc micros
 * OpenTelemetry start span
 * Recapcha
 * OPA integration
+* Rate limiter
 
 ### Consul
 https://github.com/hashicorp/learn-consul-service-mesh/tree/main
@@ -25,12 +26,15 @@ https://github.com/hashicorp/learn-consul-service-mesh/tree/main
 | Performance                         | 7                  | 10            | 5       | 8    | 8-9   |
 | Operational Excellence              | Medium             | ?             | ?       | ?    | 10    |
 | Declarative                         | 5                  | 5             |         | 6    | 10    |
-| Header enrichment                   | 5                  | 0             |         |      | 10    |
-| AUTH internal                       |                    |               |         |      | 10    |
-| AUTH Oauth / Saml                   |                    |               |         |      | ?10   |
+| Rate limiter                        | 5                  | 10            | 10      | 10   | 10    |
+| Header enrichment                   | 5                  | 5             | 5       | 5    | 10    |
+| AUTH internal                       |                    | 8             | 8       |      | 10    |
+| AUTH Oauth / Saml                   |                    |               | 10      |      | ?10   |
 | Admission based on authorised users |                    |               |         |      | 10    |
 | Recapcha                            |                    |               |         |      | 10    |
 | OPA integration                     |                    |               |         |      | ?10   |
+| Observability                       |                    |               |         |      | 7     |
+| Otel Trace start                    |                    |               |         |      | 10    | 
 
 
 # APPENDIX
