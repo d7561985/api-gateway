@@ -17,6 +17,22 @@ Research project where we could try make declarative API-Gateway for grpc micros
 ### Consul
 https://github.com/hashicorp/learn-consul-service-mesh/tree/main
 
+
+### Comparison 
+
+|                                     | Amazon API Gateway | Apache APISIX | Traefik | Gloo | Envoy |
+|-------------------------------------|--------------------|---------------|---------|------|-------|
+| Performance                         | 7                  | 10            | 5       | 8    | 8-9   |
+| Operational Excellence              | Medium             | ?             | ?       | ?    | 10    |
+| Declarative                         | 5                  | 5             |         | 6    | 10    |
+| Header enrichment                   | 5                  | 0             |         |      | 10    |
+| AUTH internal                       |                    |               |         |      | 10    |
+| AUTH Oauth / Saml                   |                    |               |         |      | ?10   |
+| Admission based on authorised users |                    |               |         |      | 10    |
+| Recapcha                            |                    |               |         |      | 10    |
+| OPA integration                     |                    |               |         |      | ?10   |
+
+
 # APPENDIX
 * https://github.com/grpc/grpc-web
 * https://github.com/fullstorydev/grpcurl
