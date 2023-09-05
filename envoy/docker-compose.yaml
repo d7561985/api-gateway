@@ -24,10 +24,10 @@ services:
       dockerfile: Dockerfile
       context: api-gateway
     volumes:
-      - "./config.yaml:/opt/auth-adapter/config.yaml"
-      #- "./envoy.yaml:/etc/envoy/envoy.yaml"
-#    entrypoint: "/usr/local/bin/envoy"
-#    command: [ "-c /etc/envoy/envoy.yaml", "-l info" ]
+#      - "./config.yaml:/opt/auth-adapter/config.yaml"
+      - "./envoy.yaml:/etc/envoy/envoy.yaml"
+    entrypoint: "/usr/local/bin/envoy"
+    command: [ "-c /etc/envoy/envoy.yaml", "-l info" ]
     ports:
       - "8080:8080"
     environment:
@@ -47,6 +47,7 @@ services:
       - "9091:9091"
     networks:
       private:
+        ipv4_address: 10.5.0.10
   health-demo:
     image: demo-health
     build:
@@ -56,6 +57,7 @@ services:
       - "8081:8081"
     networks:
       private:
+        ipv4_address: 10.5.0.11
   opentelemetry:
     build:
       dockerfile: Dockerfile
@@ -71,7 +73,11 @@ services:
     networks:
       private:
 
+
 networks:
   private:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.5.0.0/16
 

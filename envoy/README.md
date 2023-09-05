@@ -79,9 +79,25 @@ curl 'http://127.0.0.1:8080/api/FakeService/Handle' \
 ```
 
 
+## CORS
+
+```bash
+curl -v 'http://127.0.0.1:8080/FakeService/Handle2' \
+  -X 'OPTIONS' \
+  -H 'Accept: */*' \
+  -H 'Accept-Language: en,uk;q=0.9' \
+  -H 'Access-Control-Request-Headers: content-type,grpc-message' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Cache-Control: no-cache' \
+  -H 'Connection: keep-alive' \
+  -H 'Origin: http://localhost:4200' \
+  -H 'Pragma: no-cache' \
+  -H 'Referer: http://localhost:4200/' \
+```
 ## DEV
 
 ```bash
 docker run -d -v "$(pwd)"/envoy.yaml:/etc/envoy/envoy.yaml:ro \
     --network=host envoyproxy/envoy:v1.22.0
 ```
+

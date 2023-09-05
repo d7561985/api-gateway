@@ -30,9 +30,9 @@ https://github.com/hashicorp/learn-consul-service-mesh/tree/main
 | Header enrichment                   | 5                  | 5             | 5       |       | 5    | 10    |
 | AUTH internal                       |                    | 8             | 8       |       |      | 10    |
 | AUTH Oauth / Saml                   |                    |               | 10      |       |      | ?10   |
+| AUTH OPA integration                |                    |               |         |       |      | ?10   |
 | Admission based on authorised users |                    |               |         |       |      | 10    |
 | Recapcha                            |                    |               |         |       |      | 10    |
-| OPA integration                     |                    |               |         |       |      | ?10   |
 | Observability                       |                    |               |         |       |      | 7     |
 | Otel Trace start                    |                    |               |         |       |      | 10    | 
 

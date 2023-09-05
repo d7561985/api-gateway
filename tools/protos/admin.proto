@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package git.time2go.tech.apis.pinup.admin_api_gw;
+
+option go_package = "git.time2go.tech/apis/pinup/admin_api_gw";
+
+service ApiGateWayService {
+  // Health is a k8s health check endpoint: does not depend on external services.
+  rpc Liveness(LivenessRequest) returns (LivenessResponse);
+  // Health is a k8s health check endpoint: depends on external services.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message LivenessRequest {
+
+}
+
+message LivenessResponse {}
+
+message HealthRequest {}
+
+message HealthResponse {}
