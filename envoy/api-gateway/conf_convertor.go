@@ -2,16 +2,23 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
+type RateLimitConf struct {
+	Period string `yaml:"period"`
+	Count  int    `yaml:"count"`
+	Delay  string `yaml:"delay"`
+}
+
 type AuthConf struct {
-	Policy     string `yaml:"policy"`
-	Permission string `yaml:"permission"`
+	Policy     string         `yaml:"policy"`
+	Permission string         `yaml:"permission"`
+	RateLimit  *RateLimitConf `yaml:"rate_limit"`
 }
 
 const (
@@ -24,15 +31,48 @@ const (
 func (c *AuthConf) Validate() error {
 	switch c.Policy {
 	case apRequired, apOptional, apNoNeed:
-		return nil
+		// Policy is valid, continue validation
 	default:
 		return fmt.Errorf("unknown auth policy %s", c.Policy)
 	}
+
+	if c.RateLimit != nil {
+		if c.RateLimit.Count <= 0 {
+			return fmt.Errorf("rate limit count must be positive")
+		}
+		if c.RateLimit.Period == "" {
+			return fmt.Errorf("rate limit period cannot be empty")
+		}
+		// Basic period validation (could be enhanced)
+		if c.RateLimit.Period != "1s" && c.RateLimit.Period != "1m" && c.RateLimit.Period != "1h" {
+			return fmt.Errorf("rate limit period must be like '1s', '1m', '1h'")
+		}
+	}
+
+	return nil
+}
+
+type HealthCheckConf struct {
+	Path               string `yaml:"path"`                // Health check path
+	IntervalSeconds    int    `yaml:"interval_seconds"`    // Check interval
+	TimeoutSeconds     int    `yaml:"timeout_seconds"`     // Request timeout
+	HealthyThreshold   int    `yaml:"healthy_threshold"`   // Healthy threshold
+	UnhealthyThreshold int    `yaml:"unhealthy_threshold"` // Unhealthy threshold
+}
+
+type CircuitBreakerConf struct {
+	MaxConnections     int `yaml:"max_connections"`      // Max connections
+	MaxPendingRequests int `yaml:"max_pending_requests"` // Max pending requests
+	MaxRequests        int `yaml:"max_requests"`         // Max requests
+	MaxRetries         int `yaml:"max_retries"`          // Max retries
 }
 
 type ClusterConf struct {
-	Name string `yaml:"name"`
-	Addr string `yaml:"addr"`
+	Name           string              `yaml:"name"`
+	Addr           string              `yaml:"addr"`
+	Type           string              `yaml:"type"`            // "grpc" or "http"
+	HealthCheck    *HealthCheckConf    `yaml:"health_check"`    // Optional health check
+	CircuitBreaker *CircuitBreakerConf `yaml:"circuit_breaker"` // Optional circuit breaker
 }
 
 func (c ClusterConf) Validate() error {
@@ -45,6 +85,46 @@ func (c ClusterConf) Validate() error {
 		return fmt.Errorf("invalid port number %s", parts[1])
 	}
 
+	// Validate cluster type
+	if c.Type != "" && c.Type != "grpc" && c.Type != "http" {
+		return fmt.Errorf("invalid cluster type %s, must be 'grpc' or 'http'", c.Type)
+	}
+
+	// Validate health check
+	if c.HealthCheck != nil {
+		if c.HealthCheck.Path == "" {
+			return fmt.Errorf("health check path cannot be empty")
+		}
+		if c.HealthCheck.IntervalSeconds <= 0 {
+			c.HealthCheck.IntervalSeconds = 30 // default
+		}
+		if c.HealthCheck.TimeoutSeconds <= 0 {
+			c.HealthCheck.TimeoutSeconds = 5 // default
+		}
+		if c.HealthCheck.HealthyThreshold <= 0 {
+			c.HealthCheck.HealthyThreshold = 2 // default
+		}
+		if c.HealthCheck.UnhealthyThreshold <= 0 {
+			c.HealthCheck.UnhealthyThreshold = 3 // default
+		}
+	}
+
+	// Validate circuit breaker
+	if c.CircuitBreaker != nil {
+		if c.CircuitBreaker.MaxConnections <= 0 {
+			c.CircuitBreaker.MaxConnections = 1024 // default
+		}
+		if c.CircuitBreaker.MaxPendingRequests <= 0 {
+			c.CircuitBreaker.MaxPendingRequests = 1024 // default
+		}
+		if c.CircuitBreaker.MaxRequests <= 0 {
+			c.CircuitBreaker.MaxRequests = 1024 // default
+		}
+		if c.CircuitBreaker.MaxRetries <= 0 {
+			c.CircuitBreaker.MaxRetries = 3 // default
+		}
+	}
+
 	return nil
 }
 
@@ -54,6 +134,37 @@ func (c ClusterConf) AddrHost() string {
 
 func (c ClusterConf) AddrPort() string {
 	return strings.Split(c.Addr, ":")[1]
+}
+
+func (c ClusterConf) IsGRPC() bool {
+	return c.Type == "" || c.Type == "grpc" // default to gRPC
+}
+
+func (c ClusterConf) IsHTTP() bool {
+	return c.Type == "http"
+}
+
+func (r *RateLimitConf) GetFillIntervalSeconds() string {
+	switch r.Period {
+	case "1s":
+		return "1s"
+	case "1m":
+		return "60s"
+	case "1h":
+		return "3600s"
+	default:
+		return "60s" // default fallback
+	}
+}
+
+func (r *RateLimitConf) GetTokensPerFill() int {
+	// For simple implementation, tokens per fill = count
+	return r.Count
+}
+
+func (r *RateLimitConf) GetMaxTokens() int {
+	// Max tokens = count * 2 for burst capacity
+	return r.Count * 2
 }
 
 type APIConf struct {
@@ -124,7 +235,7 @@ func (c *APIConf) Validate() error {
 }
 
 func LoadConfig(file string) (*APIConf, error) {
-	data, err := ioutil.ReadFile(file)
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}

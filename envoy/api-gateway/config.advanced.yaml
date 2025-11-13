@@ -1,0 +1,75 @@
+# Advanced Example Configuration: Rate Limiting + Health Checks + Circuit Breaking
+api_route: /api/v1/
+
+# Advanced cluster configuration with health checks and circuit breaking
+clusters:
+  - name: user_service
+    addr: "user-service:9000"
+    type: "grpc"
+    health_check:
+      path: "/health"
+      interval_seconds: 30
+      timeout_seconds: 5
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+    circuit_breaker:
+      max_connections: 100
+      max_pending_requests: 50
+      max_requests: 200
+      max_retries: 3
+      
+  - name: payment_service
+    addr: "payment-service:8080"
+    type: "http"
+    health_check:
+      path: "/api/health"
+      interval_seconds: 15
+      timeout_seconds: 3
+      healthy_threshold: 1
+      unhealthy_threshold: 2
+    circuit_breaker:
+      max_connections: 50
+      max_pending_requests: 25
+      max_requests: 100
+      max_retries: 2
+
+# API configuration with rate limiting
+apis:
+  - name: "UserService"
+    cluster: "user_service"
+    auth:
+      policy: "required"
+      permission: "user:access"
+    methods:
+      - name: "GetProfile"
+        auth:
+          policy: "required"
+          permission: "user:read"
+          rate_limit: {period: "1m", count: 10, delay: "2s"}
+      - name: "UpdateProfile"
+        auth:
+          policy: "required"
+          permission: "user:write"
+          rate_limit: {period: "1m", count: 5, delay: "5s"}
+      - name: "DeleteProfile"
+        auth:
+          policy: "required"
+          permission: "user:admin"
+          rate_limit: {period: "1h", count: 2, delay: "10s"}
+
+  - name: "PaymentAPI"
+    cluster: "payment_service"
+    auth:
+      policy: "required"
+      permission: "payment:access"
+    methods:
+      - name: "ProcessPayment"
+        auth:
+          policy: "required"
+          permission: "payment:process"
+          rate_limit: {period: "1m", count: 3, delay: "10s"}
+      - name: "GetPaymentHistory"
+        auth:
+          policy: "required"
+          permission: "payment:read"
+          rate_limit: {period: "1s", count: 5, delay: "1s"}

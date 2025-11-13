@@ -1,0 +1,164 @@
+# Full Example Configuration: Mixed gRPC and HTTP Services
+# This demonstrates real-world usage with multiple service types
+
+api_route: /api/v1/
+
+# Define backend clusters with different protocols
+clusters:
+  # gRPC Services
+  - name: auth_grpc_service
+    addr: "auth-service:9000"
+    type: "grpc"                    # HTTP/2 with gRPC protocol options
+    
+  - name: user_grpc_service  
+    addr: "user-service:9000"
+    type: "grpc"
+    
+  - name: notification_grpc_service
+    addr: "notification-service:9000" 
+    type: "grpc"
+    
+  # HTTP/REST Services  
+  - name: legacy_payment_api
+    addr: "payment-api:8080"
+    type: "http"                    # HTTP/1.1 for legacy REST API
+    
+  - name: file_upload_service
+    addr: "upload-service:3000"
+    type: "http"                    # Node.js Express API
+    
+  - name: analytics_service
+    addr: "analytics-api:5000"
+    type: "http"                    # Python Flask API
+    
+  # Test Services (nicholasjackson/fake-service)
+  - name: fake_grpc_service
+    addr: "fake-grpc:9091"
+    type: "grpc"
+    
+  - name: fake_http_service  
+    addr: "fake-http:9092"
+    type: "http"
+
+# Define API routing and authentication
+apis:
+  # gRPC Services through gRPC-Web
+  - name: "auth.v1.AuthService"
+    cluster: "auth_grpc_service"
+    auth:
+      policy: "no-need"             # Public authentication endpoint
+    methods:
+      - name: "Login"
+        auth:
+          policy: "no-need"
+      - name: "RefreshToken"
+        auth:
+          policy: "no-need"
+      - name: "Logout"
+        auth:
+          policy: "required"
+          
+  - name: "user.v1.UserService"
+    cluster: "user_grpc_service"
+    auth:
+      policy: "required"            # Default: all methods require auth
+      permission: "user:read"
+    methods:
+      - name: "GetProfile"
+        auth:
+          policy: "required"
+          permission: "user:read"
+      - name: "UpdateProfile"
+        auth:
+          policy: "required"
+          permission: "user:write"
+      - name: "DeleteAccount"
+        auth:
+          policy: "required"
+          permission: "user:admin"
+          
+  - name: "notification.v1.NotificationService"
+    cluster: "notification_grpc_service"
+    auth:
+      policy: "required"
+      permission: "notification:access"
+    methods:
+      - name: "SendNotification"
+        auth:
+          policy: "required"
+          permission: "notification:send"
+      - name: "GetNotifications"
+        auth:
+          policy: "required"
+          permission: "notification:read"
+          
+  # HTTP/REST Services (proxied through gateway)
+  - name: "PaymentAPI"             # REST API: /api/v1/PaymentAPI/*
+    cluster: "legacy_payment_api"
+    auth:
+      policy: "required"
+      permission: "payment:access"
+    methods:
+      - name: "charge"             # Maps to: /api/v1/PaymentAPI/charge
+        auth:
+          policy: "required"
+          permission: "payment:charge"
+      - name: "refund"             # Maps to: /api/v1/PaymentAPI/refund  
+        auth:
+          policy: "required"
+          permission: "payment:refund"
+      - name: "webhook"            # Maps to: /api/v1/PaymentAPI/webhook
+        auth:
+          policy: "no-need"        # Public webhook endpoint
+          
+  - name: "FileUpload"             # Node.js service
+    cluster: "file_upload_service"
+    auth:
+      policy: "required"
+      permission: "file:upload"
+    methods:
+      - name: "upload"
+        auth:
+          policy: "required"
+          permission: "file:write"
+      - name: "download"
+        auth:
+          policy: "optional"       # Public files allowed
+          permission: "file:read"
+          
+  - name: "Analytics"              # Python service
+    cluster: "analytics_service"
+    auth:
+      policy: "required"
+      permission: "analytics:access"
+    methods:
+      - name: "report"
+        auth:
+          policy: "required"
+          permission: "analytics:read"
+      - name: "export"
+        auth:
+          policy: "required"
+          permission: "analytics:export"
+          
+  # Test Services
+  - name: "FakeGRPCService"        # For testing gRPC-Web
+    cluster: "fake_grpc_service"
+    auth:
+      policy: "no-need"            # Public for testing
+    methods:
+      - name: "Handle"
+        auth:
+          policy: "no-need"
+          
+  - name: "FakeHTTPService"        # For testing HTTP proxy
+    cluster: "fake_http_service"
+    auth:
+      policy: "no-need"            # Public for testing
+    methods:
+      - name: "health"             # Maps to: /api/v1/FakeHTTPService/health
+        auth:
+          policy: "no-need"
+      - name: "echo"               # Maps to: /api/v1/FakeHTTPService/echo
+        auth:
+          policy: "optional"

@@ -1,5 +1,5 @@
 ### Build stage
-FROM golang:1.20-alpine as build
+FROM golang:1.25-alpine as build
 WORKDIR /app/conf-generator
 RUN apk add git
 COPY go.mod .
@@ -8,7 +8,7 @@ COPY ./ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o conf-generator .
 
 ### main stage
-FROM envoyproxy/envoy:v1.26.2
+FROM envoyproxy/envoy:v1.36.2
 
 ENV LOG_LEVEL info
 
