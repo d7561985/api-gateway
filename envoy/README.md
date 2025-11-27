@@ -15,6 +15,7 @@ docker-compose up --build
 - `auth-adapter` - Port 9000 (authentication service)
 - `web` (fake-service gRPC) - Port 9091
 - `web-http` (fake-service HTTP) - Port 9092
+- `health-demo` - Port 8081 (gRPC health + streaming)
 - `opentelemetry` - Port 55679 (tracing UI)
 
 ### 2. Verify Services Are Running
@@ -79,6 +80,14 @@ go run . -url http://127.0.0.1:8080/api -method FakeService/Handle
 go run . -url http://127.0.0.1:8080/api -method FakeService/Handle \
   -proto ../protos/api.proto -json '{"data": "dGVzdA=="}'
 
+# gRPC Health Check with JSON response
+go run . -url http://127.0.0.1:8080/api -method grpc.health.v1.Health/Check \
+  -proto ../protos/health_check.proto
+
+# Server streaming (gRPC-Web over HTTP)
+go run . -url http://127.0.0.1:8080/api -method grpc.health.v1.Health/Watch \
+  -proto ../protos/health_check.proto -stream -timeout 5s
+
 # Protected endpoint (returns 401)
 go run . -url http://127.0.0.1:8080/api -method ProtectedService/profile
 ```
@@ -134,13 +143,22 @@ done
 **Key principle:** Methods don't need to be listed in config.yaml — they route automatically with service-level auth.
 
 ```bash
-# config.yaml has only "health" and "echo" methods for HttpService
-# But ANY path works — let's call one that's NOT in config!
+# Example 1: HTTP service
+# config.yaml has only "health" and "echo" for HttpService
 curl http://127.0.0.1:8080/api/HttpService/not-in-config
+# Expected: HTTP 200 + JSON response
 
-# Expected: HTTP 200 + REAL JSON response
-# This proves: gateway routes ALL methods, not just configured ones!
+# Example 2: gRPC streaming
+# config.yaml has only "Check" for grpc.health.v1.Health
+cd tools/grpcwebcli
+go run . -url http://127.0.0.1:8080/api \
+  -method grpc.health.v1.Health/Watch \
+  -proto ../protos/health_check.proto \
+  -stream -timeout 3s
+# Expected: HTTP 200 + streaming frames {"status":"SERVING"}
 ```
+
+Both examples prove: gateway routes ALL methods, not just configured ones!
 
 See [Zero-Config Method Routing](../README.md#zero-config-method-routing) for details.
 
@@ -387,18 +405,23 @@ cd tools/grpcwebcli
 | **1** | **Services Running** | `docker-compose ps` | All containers "Up" | ☐ |
 | **2** | **Envoy Ready** | `curl http://localhost:8000/ready` | "LIVE" | ☐ |
 | **3** | **HTTP Proxy** | `curl http://127.0.0.1:8080/api/HttpService/health` | HTTP 200 + JSON | ☐ |
-| **4** | **gRPC-Web** | `go run . -url http://127.0.0.1:8080/api -method FakeService/Handle` | HTTP 200 + DATA frame | ☐ |
-| **5** | **Auth: no token** | `curl http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 401 | ☐ |
-| **6** | **Auth: invalid token** | `curl -H 'cookie: token=invalid' http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 401 | ☐ |
-| **7** | **Auth: valid token** | `curl -H 'cookie: token=demo-token' http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 200 | ☐ |
-| **8** | **Auth: optional (no token)** | `curl http://127.0.0.1:8080/api/ProtectedService/data -w "\nHTTP: %{http_code}\n"` | HTTP 200 | ☐ |
-| **9** | **CORS Preflight** | `curl -X OPTIONS http://127.0.0.1:8080/api/FakeService/Handle -H 'origin: http://test.com' -H 'access-control-request-method: POST' -I` | 200 + CORS headers | ☐ |
-| **10** | **Rate Limiting** | Run rate limit script below | First ~10 OK, then 429 | ☐ |
-| **11** | **Zero-config routing** | `curl http://127.0.0.1:8080/api/HttpService/not-in-config` | HTTP 200 + JSON | ☐ |
-| **12** | **Health check: healthy** | `curl -s http://localhost:8000/clusters \| grep web-http` | `health_flags::healthy` | ☐ |
-| **13** | **Health check: unhealthy** | `curl http://127.0.0.1:8080/api/UnhealthyService/test -w "\nHTTP: %{http_code}\n"` | HTTP 503 | ☐ |
+| **4** | **gRPC-Web (unary)** | `go run . -url http://127.0.0.1:8080/api -method FakeService/Handle` | HTTP 200 + DATA frame | ☐ |
+| **5** | **gRPC-Web (streaming)** | `go run . -url http://127.0.0.1:8080/api -method grpc.health.v1.Health/Watch -proto ../protos/health_check.proto -stream -timeout 3s` | Multiple DATA frames | ☐ |
+| **6** | **Auth: no token** | `curl http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 401 | ☐ |
+| **7** | **Auth: invalid token** | `curl -H 'cookie: token=invalid' http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 401 | ☐ |
+| **8** | **Auth: valid token** | `curl -H 'cookie: token=demo-token' http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 200 | ☐ |
+| **9** | **Auth: optional (no token)** | `curl http://127.0.0.1:8080/api/ProtectedService/data -w "\nHTTP: %{http_code}\n"` | HTTP 200 | ☐ |
+| **10** | **CORS Preflight** | `curl -X OPTIONS http://127.0.0.1:8080/api/FakeService/Handle -H 'origin: http://test.com' -H 'access-control-request-method: POST' -I` | 200 + CORS headers | ☐ |
+| **11** | **Rate Limiting** | Run rate limit script below | First ~10 OK, then 429 | ☐ |
+| **12** | **Zero-config (HTTP)** | `curl http://127.0.0.1:8080/api/HttpService/not-in-config` | HTTP 200 + JSON | ☐ |
+| **13** | **Zero-config (gRPC)** | Test #5 uses `Watch` method NOT in config | Streaming works! | ☐ |
+| **14** | **Health check: healthy** | `curl -s http://localhost:8000/clusters \| grep web-http` | `health_flags::healthy` | ☐ |
+| **15** | **Health check: unhealthy** | `curl http://127.0.0.1:8080/api/UnhealthyService/test -w "\nHTTP: %{http_code}\n"` | HTTP 503 | ☐ |
 
-**Test #11 explained:** Path `/HttpService/not-in-config` is NOT listed in config.yaml (only `health` and `echo` are), but gateway STILL routes it and returns REAL response. This proves zero-config routing works!
+**Zero-config explained:**
+- Test #12: `/HttpService/not-in-config` is NOT in config (only `health`, `echo`)
+- Test #13: `Watch` method is NOT in config (only `Check`)
+Both route and return REAL data — proves zero-config routing works!
 
 ### Rate Limit Test Script
 ```bash

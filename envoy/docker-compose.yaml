@@ -58,6 +58,15 @@ services:
       - "9092:9092"
     networks:
       private:
+  health-demo:
+    image: demo-health
+    build:
+      dockerfile: Dockerfile
+      context: ../tools/health-demo
+    ports:
+      - "8081:8081"
+    networks:
+      private:
   opentelemetry:
     build:
       dockerfile: Dockerfile

@@ -22,6 +22,11 @@ clusters:
       path: "/health"
       interval_seconds: 5
 
+  # gRPC Health service (for streaming tests)
+  - name: health-demo
+    addr: "health-demo:8081"
+    type: "grpc"
+
 apis:
   # gRPC-Web тестирование
   - name: FakeService
@@ -59,3 +64,11 @@ apis:
   - name: UnhealthyService
     cluster: unhealthy-demo
     auth: {policy: no-need}
+
+  # gRPC Health service (streaming test via Watch method)
+  - name: grpc.health.v1.Health
+    cluster: health-demo
+    auth: {policy: no-need}
+    methods:
+      - name: Check
+        auth: {policy: no-need}
