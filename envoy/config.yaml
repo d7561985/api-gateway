@@ -1,20 +1,58 @@
-api_route: /
+api_route: /api/
+
+clusters:
+  # gRPC сервис (fake-service в gRPC режиме)
+  - name: web
+    addr: "web:9091"
+    type: "grpc"
+
+  # HTTP сервис (fake-service в HTTP режиме)
+  - name: web-http
+    addr: "web-http:9092"
+    type: "http"
+
+  # Health check сервис
+  - name: health-demo
+    addr: "health-demo:8081"
+    type: "grpc"
 
 apis:
+  # gRPC-Web тестирование
   - name: FakeService
-    auth: {policy: no-need}
     cluster: web
+    auth: {policy: no-need}
     methods:
       - name: Handle
         auth:
           policy: no-need
-          rate_limit: {period: "1m", count: 3, delay: "3s"}
+          rate_limit: {period: "1m", count: 10, delay: "3s"}
+
+  # HTTP REST тестирование (public)
+  - name: HttpService
+    cluster: web-http
+    auth: {policy: no-need}
+    methods:
+      - name: health
+        auth: {policy: no-need}
+      - name: echo
+        auth: {policy: no-need}
+
+  # Protected HTTP endpoint (requires auth)
+  - name: ProtectedService
+    cluster: web-http
+    auth: {policy: required}
+    methods:
+      - name: profile
+        auth:
+          policy: required
+      - name: data
+        auth:
+          policy: optional
+
+  # gRPC Health Check
   - name: grpc.health.v1.Health
     cluster: health-demo
     auth: {policy: no-need}
-
-clusters:
-  - name: web
-    addr: "web:9091"
-  - name: health-demo
-    addr: "health-demo:8081"
+    methods:
+      - name: Check
+        auth: {policy: no-need}

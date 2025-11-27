@@ -83,14 +83,17 @@ func (s *server) Close() error {
 }
 
 func formCheckResponse(code v3.StatusCode, message string, headers []*envoy_api_v3_core.HeaderValueOption) *envoy_service_auth_v3.CheckResponse {
-	resp := &envoy_service_auth_v3.CheckResponse{
-		Status: &status1.Status{Code: int32(code1.Code_OK), Message: message},
-	}
+	resp := &envoy_service_auth_v3.CheckResponse{}
+
 	if code == 0 {
+		// Allow request
+		resp.Status = &status1.Status{Code: int32(code1.Code_OK), Message: message}
 		resp.HttpResponse = &envoy_service_auth_v3.CheckResponse_OkResponse{
 			OkResponse: &envoy_service_auth_v3.OkHttpResponse{Headers: headers},
 		}
 	} else {
+		// Deny request - Status must be non-OK for Envoy to deny
+		resp.Status = &status1.Status{Code: int32(code1.Code_PERMISSION_DENIED), Message: message}
 		resp.HttpResponse = &envoy_service_auth_v3.CheckResponse_DeniedResponse{
 			DeniedResponse: &envoy_service_auth_v3.DeniedHttpResponse{
 				Status:  &v3.HttpStatus{Code: code},
@@ -119,13 +122,23 @@ func (s *server) Check(ctx context.Context, in *envoy_service_auth_v3.CheckReque
 
 	respHeaders := []*envoy_api_v3_core.HeaderValueOption{}
 	headers := in.Attributes.Request.Http.Headers
-	path, ok := headers[":path"]
-	if !ok {
+
+	// Get path from request (Envoy passes it in Http.Path, not in headers)
+	path := in.Attributes.Request.Http.Path
+	if path == "" {
+		// Fallback to :path header for gRPC requests
+		path = headers[":path"]
+	}
+	if path == "" {
 		st := status.New(codes.InvalidArgument, ":path header is not found")
 		return nil, st.Err()
 	}
 
 	service, method := parsePath(path)
+	s.logger.Debug("parsed path",
+		tel.String("path", path),
+		tel.String("service", service),
+		tel.String("method", method))
 	if service == "" || method == "" {
 		return formCheckResponse(v3.StatusCode_BadRequest, "bad path", respHeaders), nil
 	}
@@ -135,15 +148,20 @@ func (s *server) Check(ctx context.Context, in *envoy_service_auth_v3.CheckReque
 		attribute.String("method", method),
 	)
 
-	if headers["x-real-ip"] == "" {
-		s.logger.Error("x-real-ip must be in request headers")
+	// Get client IP from x-real-ip or x-forwarded-for
+	clientIP := headers["x-real-ip"]
+	if clientIP == "" {
+		clientIP = headers["x-forwarded-for"]
+	}
+	if clientIP == "" {
+		s.logger.Warn("client IP not found in headers (x-real-ip or x-forwarded-for)")
 	}
 
 	v2RepatchaPassed := false
-	if !s.rateLimitManager.Check(headers["x-real-ip"], method) {
+	if !s.rateLimitManager.Check(clientIP, method) {
 		v2RepatchaPassed = s.checkReCaptcha(headers, true /*v2*/)
 		if v2RepatchaPassed {
-			s.rateLimitManager.Reset(headers["x-real-ip"], method)
+			s.rateLimitManager.Reset(clientIP, method)
 		} else {
 			return formCheckResponse(v3.StatusCode_TooManyRequests, "rate limit is reached", respHeaders), nil
 		}
@@ -174,6 +192,9 @@ func (s *server) Check(ctx context.Context, in *envoy_service_auth_v3.CheckReque
 
 	if token == "" && reqPermission.Optional() {
 		return formCheckResponse(0, "", respHeaders), nil
+	}
+	if token == "" && reqPermission.Required() {
+		return formCheckResponse(v3.StatusCode_Unauthorized, "token required", respHeaders), nil
 	}
 
 	// validate session

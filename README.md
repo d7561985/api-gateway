@@ -162,6 +162,40 @@ apis:
           rate_limit: {period: "1m", count: 3, delay: "10s"} # NEW: Very strict limits
 ```
 
+### gRPC Service Naming
+
+Service name in config **must match the gRPC path** which depends on proto `package`:
+
+| Proto definition | Config `name` | gRPC path |
+|------------------|---------------|-----------|
+| No package: `service Foo {}` | `Foo` | `/Foo/Method` |
+| With package: `package x.y; service Bar {}` | `x.y.Bar` | `/x.y.Bar/Method` |
+
+**Examples:**
+
+```protobuf
+// No package declaration
+service UserService { rpc GetUser(...) }
+// → Config name: "UserService"
+// → Path: /api/v1/UserService/GetUser
+
+// With package
+package grpc.health.v1;
+service Health { rpc Check(...) }
+// → Config name: "grpc.health.v1.Health"
+// → Path: /api/v1/grpc.health.v1.Health/Check
+```
+
+> **Note:** `option go_package` is for Go code generation only — it does **NOT** affect gRPC routing!
+
+### Method Routing Behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| Configured method | Uses method-level auth config |
+| Unconfigured method | Falls back to service-level auth, backend returns `UNIMPLEMENTED` |
+| Unknown service | Gateway returns 404 (no route) |
+
 ### Supported Configuration Options
 
 #### Authentication Policies

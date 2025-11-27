@@ -147,6 +147,8 @@ static_resources:
           generate_request_id: true
           codec_type: auto
           stat_prefix: ingress_http
+          use_remote_address: true
+          xff_num_trusted_hops: 0
           access_log:
             - name: envoy.access_loggers.stdout
               typed_config:
@@ -182,6 +184,17 @@ static_resources:
                   timeout: 30s
                   envoy_grpc:
                     cluster_name: ext_auth
+                with_request_body:
+                  max_request_bytes: 1024
+                  allow_partial_message: true
+                allowed_headers:
+                  patterns:
+                    - exact: "cookie"
+                    - exact: "authorization"
+                    - exact: "x-real-ip"
+                    - exact: "x-forwarded-for"
+                    - exact: "x-rc-token"
+                    - exact: "x-rc-token-2"
           - name: envoy.filters.http.grpc_web
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_web.v3.GrpcWeb
