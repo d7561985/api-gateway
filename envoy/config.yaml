@@ -10,11 +10,17 @@ clusters:
   - name: web-http
     addr: "web-http:9092"
     type: "http"
+    health_check:
+      path: "/health"
+      interval_seconds: 10
 
-  # Health check сервис
-  - name: health-demo
-    addr: "health-demo:8081"
-    type: "grpc"
+  # Unhealthy cluster for testing (port not listening)
+  - name: unhealthy-demo
+    addr: "web-http:9999"
+    type: "http"
+    health_check:
+      path: "/health"
+      interval_seconds: 5
 
 apis:
   # gRPC-Web тестирование
@@ -49,10 +55,7 @@ apis:
         auth:
           policy: optional
 
-  # gRPC Health Check
-  - name: grpc.health.v1.Health
-    cluster: health-demo
+  # Unhealthy service for testing health checks
+  - name: UnhealthyService
+    cluster: unhealthy-demo
     auth: {policy: no-need}
-    methods:
-      - name: Check
-        auth: {policy: no-need}

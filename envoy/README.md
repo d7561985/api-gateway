@@ -15,7 +15,6 @@ docker-compose up --build
 - `auth-adapter` - Port 9000 (authentication service)
 - `web` (fake-service gRPC) - Port 9091
 - `web-http` (fake-service HTTP) - Port 9092
-- `health-demo` - Port 8081 (health checks)
 - `opentelemetry` - Port 55679 (tracing UI)
 
 ### 2. Verify Services Are Running
@@ -39,7 +38,7 @@ Current configuration (`config.yaml`) provides:
 |---------|----------|-------------|
 | gRPC-Web | `/api/FakeService/Handle` | gRPC service via gRPC-Web |
 | HTTP Proxy | `/api/HttpService/*` | HTTP/REST service proxy |
-| Health Check | `/api/grpc.health.v1.Health/Check` | gRPC health checking |
+| Health Check | `localhost:8000/clusters` | Envoy cluster health monitoring |
 | Rate Limiting | FakeService/Handle | 10 req/min limit |
 
 ---
@@ -65,27 +64,58 @@ curl 'http://127.0.0.1:8080/api/HttpService/echo' \
 
 ### 2. gRPC-Web (Browser-compatible gRPC)
 
-gRPC-Web requires binary framing. Use file-based approach for curl:
+**Option A: Using grpcwebcli (recommended)**
+
+Custom CLI tool with path prefix support located in `tools/grpcwebcli/`:
+
+```bash
+# From tools/grpcwebcli directory:
+cd tools/grpcwebcli
+
+# Simple call (empty request)
+go run . -url http://127.0.0.1:8080/api -method FakeService/Handle
+
+# With proto file and JSON data
+go run . -url http://127.0.0.1:8080/api -method FakeService/Handle \
+  -proto ../protos/api.proto -json '{"data": "dGVzdA=="}'
+
+# Protected endpoint (returns 401)
+go run . -url http://127.0.0.1:8080/api -method ProtectedService/profile
+```
+
+**grpcwebcli options:**
+| Flag | Description |
+|------|-------------|
+| `-url` | Base URL with path prefix (default: `http://127.0.0.1:8080`) |
+| `-method` | Service/Method to call (e.g., `FakeService/Handle`) |
+| `-proto` | Path to .proto file (enables JSON input/output) |
+| `-json` | JSON request data (requires `-proto`) |
+| `-stream` | Enable server streaming mode |
+| `-timeout` | Request timeout (default: `30s`) |
+
+**Option B: Using curl**
+
+gRPC-Web requires binary framing:
 
 ```bash
 # Create empty gRPC request (5-byte frame header)
 printf '\x00\x00\x00\x00\x00' > /tmp/grpc-req.bin
 
-# Send gRPC-Web request
+# Send gRPC-Web request (check status only)
 curl 'http://127.0.0.1:8080/api/FakeService/Handle' \
   -H 'content-type: application/grpc-web+proto' \
   -H 'x-grpc-web: 1' \
   --data-binary @/tmp/grpc-req.bin \
-  -v
+  -s -o /dev/null -w "HTTP: %{http_code}\n"
 
-# Expected: HTTP 200 with gRPC-Web response
+# Expected: HTTP: 200
 ```
 
 ### 3. Rate Limiting
 
 ```bash
 # Test rate limit (10 requests per minute on FakeService/Handle)
-for i in {1..12}; do
+for i in {1..20}; do
   echo "Request $i:"
   printf '\x00\x00\x00\x00\x00' > /tmp/grpc-req.bin
   curl 'http://127.0.0.1:8080/api/FakeService/Handle' \
@@ -99,20 +129,20 @@ done
 # Expected: First 10-20 succeed (200), then 429 Too Many Requests
 ```
 
-### 4. Unconfigured Method Routing
+### 4. Zero-Config Method Routing
+
+**Key principle:** Methods don't need to be listed in config.yaml — they route automatically with service-level auth.
 
 ```bash
-# Call a method not explicitly configured in config.yaml
-# Should route to backend using service-level auth, backend returns UNIMPLEMENTED
-printf '\x00\x00\x00\x00\x00' > /tmp/grpc-req.bin
-curl 'http://127.0.0.1:8080/api/FakeService/NonExistentMethod' \
-  -H 'content-type: application/grpc-web+proto' \
-  -H 'x-grpc-web: 1' \
-  --data-binary @/tmp/grpc-req.bin \
-  -v 2>&1 | grep "grpc-status"
+# config.yaml has only "health" and "echo" methods for HttpService
+# But ANY path works — let's call one that's NOT in config!
+curl http://127.0.0.1:8080/api/HttpService/not-in-config
 
-# Expected: grpc-status: 12 (UNIMPLEMENTED)
+# Expected: HTTP 200 + REAL JSON response
+# This proves: gateway routes ALL methods, not just configured ones!
 ```
+
+See [Zero-Config Method Routing](../README.md#zero-config-method-routing) for details.
 
 ### 5. CORS Preflight
 
@@ -127,16 +157,20 @@ curl -X OPTIONS 'http://127.0.0.1:8080/api/FakeService/Handle' \
 # Expected: 200 with CORS headers (Access-Control-Allow-*)
 ```
 
-### 6. Health Check
+### 6. Health Check (Envoy Cluster Monitoring)
 
 ```bash
-# gRPC Health Check via gateway
-printf '\x00\x00\x00\x00\x00' > /tmp/grpc-req.bin
-curl 'http://127.0.0.1:8080/api/grpc.health.v1.Health/Check' \
-  -H 'content-type: application/grpc-web+proto' \
-  -H 'x-grpc-web: 1' \
-  --data-binary @/tmp/grpc-req.bin \
-  -v
+# Check cluster health via Envoy admin
+curl -s http://localhost:8000/clusters | grep "health_flags"
+
+# Expected output:
+# web::172.18.0.3:9091::health_flags::healthy
+# web-http::172.18.0.4:9092::health_flags::healthy
+# unhealthy-demo::172.18.0.4:9999::health_flags::/failed_active_hc
+
+# Test unhealthy cluster returns 503
+curl http://127.0.0.1:8080/api/UnhealthyService/test -w "\nHTTP: %{http_code}\n"
+# Expected: HTTP: 503
 ```
 
 ### 7. Authorization Testing
@@ -228,15 +262,17 @@ apis:
   - name: FakeService      # gRPC service name (see naming rules below)
     cluster: web
     auth:
-      policy: "no-need"    # service-level auth (fallback for unconfigured methods)
-    methods:
-      - name: Handle       # only method name, without service prefix
+      policy: "no-need"    # DEFAULT for ALL methods (zero-config routing)
+    methods:               # OPTIONAL! Only for method-specific overrides
+      - name: Handle       # Override: add rate limit to this method
         auth:
           policy: no-need
           rate_limit:
             period: "1m"   # 1s | 1m | 1h
             count: 10
             delay: "3s"
+    # All other methods (GetStatus, Process, etc.) route automatically
+    # with service-level auth policy "no-need"
 ```
 
 ### gRPC-Web Testing Limitations with Path Prefix
@@ -251,9 +287,10 @@ grpcurl -plaintext 127.0.0.1:8080         # ✗ Won't work with /api/ prefix
 ```
 
 **Testing options:**
-1. **curl** — use binary gRPC-Web requests (see examples above)
-2. **Direct backend** — connect Evans/grpcurl to backend port (e.g., 9091)
-3. **Frontend client** — production JavaScript clients work correctly
+1. **grpcwebcli** — custom tool in `tools/grpcwebcli/` with path prefix support (recommended)
+2. **curl** — use binary gRPC-Web requests (see examples above)
+3. **Direct backend** — connect Evans/grpcurl to backend port (e.g., 9091)
+4. **Frontend client** — production JavaScript clients work correctly
 
 **Frontend clients work fine** — just specify base URL without trailing slash:
 ```javascript
@@ -332,6 +369,47 @@ docker run --rm \
   envoyproxy/envoy:v1.36.2 \
   --mode validate \
   --config-path /etc/envoy/envoy.yaml
+```
+
+---
+
+## Verification Checklist
+
+Use this checklist to verify API Gateway is fully operational after deployment or changes.
+
+### Prerequisites
+```bash
+cd tools/grpcwebcli
+```
+
+| # | Feature | Command | Expected | ✓ |
+|---|---------|---------|----------|---|
+| **1** | **Services Running** | `docker-compose ps` | All containers "Up" | ☐ |
+| **2** | **Envoy Ready** | `curl http://localhost:8000/ready` | "LIVE" | ☐ |
+| **3** | **HTTP Proxy** | `curl http://127.0.0.1:8080/api/HttpService/health` | HTTP 200 + JSON | ☐ |
+| **4** | **gRPC-Web** | `go run . -url http://127.0.0.1:8080/api -method FakeService/Handle` | HTTP 200 + DATA frame | ☐ |
+| **5** | **Auth: no token** | `curl http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 401 | ☐ |
+| **6** | **Auth: invalid token** | `curl -H 'cookie: token=invalid' http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 401 | ☐ |
+| **7** | **Auth: valid token** | `curl -H 'cookie: token=demo-token' http://127.0.0.1:8080/api/ProtectedService/profile -w "\nHTTP: %{http_code}\n"` | HTTP 200 | ☐ |
+| **8** | **Auth: optional (no token)** | `curl http://127.0.0.1:8080/api/ProtectedService/data -w "\nHTTP: %{http_code}\n"` | HTTP 200 | ☐ |
+| **9** | **CORS Preflight** | `curl -X OPTIONS http://127.0.0.1:8080/api/FakeService/Handle -H 'origin: http://test.com' -H 'access-control-request-method: POST' -I` | 200 + CORS headers | ☐ |
+| **10** | **Rate Limiting** | Run rate limit script below | First ~10 OK, then 429 | ☐ |
+| **11** | **Zero-config routing** | `curl http://127.0.0.1:8080/api/HttpService/not-in-config` | HTTP 200 + JSON | ☐ |
+| **12** | **Health check: healthy** | `curl -s http://localhost:8000/clusters \| grep web-http` | `health_flags::healthy` | ☐ |
+| **13** | **Health check: unhealthy** | `curl http://127.0.0.1:8080/api/UnhealthyService/test -w "\nHTTP: %{http_code}\n"` | HTTP 503 | ☐ |
+
+**Test #11 explained:** Path `/HttpService/not-in-config` is NOT listed in config.yaml (only `health` and `echo` are), but gateway STILL routes it and returns REAL response. This proves zero-config routing works!
+
+### Rate Limit Test Script
+```bash
+for i in {1..15}; do
+  echo -n "Request $i: "
+  printf '\x00\x00\x00\x00\x00' | curl -s -o /dev/null -w "%{http_code}\n" \
+    'http://127.0.0.1:8080/api/FakeService/Handle' \
+    -H 'content-type: application/grpc-web+proto' \
+    -H 'x-grpc-web: 1' --data-binary @-
+  sleep 0.5
+done
 ```
 
 ---

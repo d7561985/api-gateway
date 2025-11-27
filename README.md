@@ -188,13 +188,41 @@ service Health { rpc Check(...) }
 
 > **Note:** `option go_package` is for Go code generation only — it does **NOT** affect gRPC routing!
 
+### Zero-Config Method Routing
+
+**Key Principle:** API Gateway does NOT require explicit method configuration. All methods are routed automatically using service-level defaults.
+
+```yaml
+apis:
+  - name: "UserService"
+    cluster: "user_service"
+    auth:
+      policy: "required"        # ← Default for ALL methods
+      permission: "user:access"
+    methods:                    # ← OPTIONAL! Only for overrides
+      - name: "PublicProfile"
+        auth:
+          policy: "no-need"     # Override: this method is public
+      - name: "CreateUser"
+        auth:
+          rate_limit: {period: "1m", count: 5}  # Override: add rate limit
+```
+
+**How it works:**
+- `/UserService/GetUser` → Routed with service-level auth (`required`)
+- `/UserService/DeleteUser` → Routed with service-level auth (`required`)
+- `/UserService/PublicProfile` → Routed with method-level override (`no-need`)
+- `/UserService/AnyOtherMethod` → Routed with service-level auth (`required`)
+
 ### Method Routing Behavior
 
-| Scenario | Behavior |
-|----------|----------|
-| Configured method | Uses method-level auth config |
-| Unconfigured method | Falls back to service-level auth, backend returns `UNIMPLEMENTED` |
-| Unknown service | Gateway returns 404 (no route) |
+| Scenario | Routing | Auth | Response |
+|----------|---------|------|----------|
+| Configured method | ✅ Routed | Method-level config | Backend handles |
+| Unconfigured method | ✅ Routed | Service-level default | Backend handles |
+| Unknown service | ❌ Not routed | N/A | Gateway 404 |
+
+> **Important:** "Unconfigured method" means method not listed in `methods:` array. The request is STILL routed to backend — backend decides if method exists (returns response or `UNIMPLEMENTED`).
 
 ### Supported Configuration Options
 
