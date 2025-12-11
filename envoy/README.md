@@ -15,7 +15,8 @@ docker-compose up --build
 - `auth-adapter` - Port 9000 (authentication service)
 - `web` (fake-service gRPC) - Port 9091
 - `web-http` (fake-service HTTP) - Port 9092
-- `health-demo` - Port 8081 (gRPC health + streaming)
+- `health-demo` - Port 8081 (gRPC health + streaming + header logging)
+- `http-echo` - Port 8888 (header inspection service)
 - `opentelemetry` - Port 55679 (tracing UI)
 
 ### 2. Verify Services Are Running
@@ -39,6 +40,7 @@ Current configuration (`config.yaml`) provides:
 |---------|----------|-------------|
 | gRPC-Web | `/api/FakeService/Handle` | gRPC service via gRPC-Web |
 | HTTP Proxy | `/api/HttpService/*` | HTTP/REST service proxy |
+| **Header Echo** | `/api/EchoPublic/*`, `/api/EchoProtected/*`, `/api/EchoOptional/*` | Returns all headers in JSON (for testing auth-adapter) |
 | Health Check | `localhost:8000/clusters` | Envoy cluster health monitoring |
 | Rate Limiting | FakeService/Handle | 10 req/min limit |
 
@@ -223,6 +225,38 @@ curl -w "\nHTTP: %{http_code}\n" \
   -H 'cookie: token=demo-token' \
   'http://127.0.0.1:8080/api/ProtectedService/data'
 # Expected: HTTP: 200
+```
+
+### 8. Header Enrichment Testing (http-echo)
+
+The `http-echo` service returns all received headers in JSON format. Use it to verify auth-adapter injects `user-id` and `session-id` headers.
+
+```bash
+# Test 1: Public endpoint (no auth headers expected)
+curl -s http://127.0.0.1:8080/api/EchoPublic/headers | jq '.headers | {"user-id", "session-id"}'
+# Expected: both null
+
+# Test 2: Protected endpoint without cookie (should fail)
+curl -s -w "\nHTTP: %{http_code}\n" http://127.0.0.1:8080/api/EchoProtected/headers
+# Expected: HTTP: 401
+
+# Test 3: Protected endpoint with valid cookie (should show enriched headers)
+curl -s http://127.0.0.1:8080/api/EchoProtected/headers \
+  -H 'cookie: token=demo-token' | jq '.headers | {"user-id", "session-id"}'
+# Expected: user-id and session-id populated by auth-adapter
+
+# Test 4: Optional auth endpoint
+curl -s http://127.0.0.1:8080/api/EchoOptional/headers | jq '.headers | keys'
+# Expected: HTTP 200 with all Envoy headers (no user-id without cookie)
+
+# Test 5: View ALL headers received by backend
+curl -s http://127.0.0.1:8080/api/EchoPublic/headers | jq '.headers'
+```
+
+**gRPC header logging:**
+The `health-demo` service logs all gRPC metadata (headers) to stdout. Check logs after gRPC requests:
+```bash
+docker-compose logs -f health-demo
 ```
 
 ---
@@ -417,6 +451,9 @@ cd tools/grpcwebcli
 | **13** | **Zero-config (gRPC)** | Test #5 uses `Watch` method NOT in config | Streaming works! | ☐ |
 | **14** | **Health check: healthy** | `curl -s http://localhost:8000/clusters \| grep web-http` | `health_flags::healthy` | ☐ |
 | **15** | **Health check: unhealthy** | `curl http://127.0.0.1:8080/api/UnhealthyService/test -w "\nHTTP: %{http_code}\n"` | HTTP 503 | ☐ |
+| **16** | **Header echo (public)** | `curl -s http://127.0.0.1:8080/api/EchoPublic/headers \| jq '.headers \| keys'` | Array of headers | ☐ |
+| **17** | **Header echo (protected)** | `curl -s http://127.0.0.1:8080/api/EchoProtected/headers -w "\nHTTP: %{http_code}\n"` | HTTP 401 | ☐ |
+| **18** | **Header enrichment** | `curl -s -H 'cookie: token=demo-token' http://127.0.0.1:8080/api/EchoProtected/headers \| jq '.headers \| {"user-id","session-id"}'` | user-id + session-id | ☐ |
 
 **Zero-config explained:**
 - Test #12: `/HttpService/not-in-config` is NOT in config (only `health`, `echo`)
@@ -437,4 +474,4 @@ done
 
 ---
 
-**Verified with:** Envoy v1.36.2, nicholasjackson/fake-service:v0.19.1
+**Verified with:** Envoy v1.36.2, nicholasjackson/fake-service:v0.19.1, mendhak/http-https-echo

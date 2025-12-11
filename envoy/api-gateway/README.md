@@ -127,3 +127,126 @@ user-id: 12345
 session-id: sess_abc123
 authorization: Bearer token...
 ```
+
+## Testing Header Enrichment
+
+### HTTP Echo Service (mendhak/http-https-echo)
+
+The `http-echo` service returns all received headers in JSON format, perfect for verifying auth-adapter header injection.
+
+**Start services:**
+```bash
+cd envoy
+docker-compose up -d
+```
+
+**Test 1: Public endpoint (no auth) - baseline:**
+```bash
+curl -s http://localhost:8080/api/EchoPublic/headers | jq '.headers'
+```
+Expected: No `user-id` or `session-id` headers.
+
+**Test 2: Protected endpoint WITHOUT auth cookie - should fail:**
+```bash
+curl -s -w "\nHTTP Status: %{http_code}\n" http://localhost:8080/api/EchoProtected/headers
+```
+Expected: 401 Unauthorized.
+
+**Test 3: Protected endpoint WITH auth cookie - should show enriched headers:**
+```bash
+curl -s http://localhost:8080/api/EchoProtected/headers \
+  -H "Cookie: session=YOUR_VALID_SESSION_TOKEN" | jq '.headers'
+```
+Expected response includes:
+```json
+{
+  "user-id": "12345",
+  "session-id": "sess_abc123",
+  ...
+}
+```
+
+**Test 4: Optional auth - with and without cookie:**
+```bash
+# Without auth - should work, no user headers
+curl -s http://localhost:8080/api/EchoOptional/headers | jq '.headers | {"user-id", "session-id"}'
+
+# With auth - should show enriched headers
+curl -s http://localhost:8080/api/EchoOptional/headers \
+  -H "Cookie: session=YOUR_VALID_SESSION_TOKEN" | jq '.headers | {"user-id", "session-id"}'
+```
+
+### gRPC Health Demo (header logging)
+
+The `health-demo` service logs all incoming gRPC metadata (headers) to stdout, making it easy to verify header enrichment for gRPC services.
+
+**View health-demo logs:**
+```bash
+docker-compose logs -f health-demo
+```
+
+**Trigger gRPC Health Check through API Gateway:**
+```bash
+# Using grpcurl (requires proto file or reflection)
+grpcurl -plaintext -protoset health.protoset localhost:8080 grpc.health.v1.Health/Check
+
+# Or use grpc-web from browser/Node.js client
+```
+
+**Expected log output in health-demo (when auth headers are passed):**
+```
+=== gRPC Health Check - Received Headers ===
+{
+  "user-id": ["12345"],
+  "session-id": ["sess_abc123"],
+  ":authority": ["localhost:8080"],
+  "content-type": ["application/grpc"],
+  ...
+}
+>>> user-id: 12345
+>>> session-id: sess_abc123
+```
+
+### Quick Verification Script
+
+```bash
+#!/bin/bash
+PORT=${1:-18080}
+echo "=== Header Enrichment Test Suite (port: $PORT) ==="
+
+echo -e "\n1. Public endpoint (no auth headers expected):"
+curl -s http://localhost:$PORT/api/EchoPublic/test | jq -r '.headers | to_entries | .[] | select(.key | test("user-id|session-id")) | "\(.key): \(.value)"' || echo "  (none found - expected)"
+
+echo -e "\n2. Protected endpoint without auth (should return 401):"
+curl -s -w "HTTP Status: %{http_code}\n" http://localhost:$PORT/api/EchoProtected/headers -o /dev/null
+
+echo -e "\n3. Optional endpoint without auth:"
+result=$(curl -s http://localhost:$PORT/api/EchoOptional/headers | jq -r '.headers | to_entries | .[] | select(.key | test("user-id|session-id")) | "\(.key): \(.value)"')
+if [ -z "$result" ]; then
+  echo "  No auth headers (expected without cookie)"
+else
+  echo "$result"
+fi
+
+echo -e "\n4. All headers on public endpoint:"
+curl -s http://localhost:$PORT/api/EchoPublic/headers | jq '.headers | keys'
+```
+
+### Verifying Auth-Adapter Header Enrichment
+
+To fully test header enrichment, you need a valid session. The flow is:
+
+1. **Authenticate** with your auth service to get a session cookie
+2. **Use the cookie** in requests to protected/optional endpoints
+3. **Observe** `user-id` and `session-id` headers in the response
+
+```bash
+# Example with valid session
+curl -s http://localhost:8080/api/EchoProtected/profile \
+  -H "Cookie: session=<your-valid-session-token>" | jq '{
+    path: .path,
+    user_id: .headers["user-id"],
+    session_id: .headers["session-id"],
+    all_headers: (.headers | keys)
+  }'
+```

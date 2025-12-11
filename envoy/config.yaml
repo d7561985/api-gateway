@@ -27,6 +27,12 @@ clusters:
     addr: "health-demo:8081"
     type: "grpc"
 
+  # HTTP Echo service - returns all headers in JSON response
+  # Use for testing auth-adapter header enrichment (user-id, session-id)
+  - name: http-echo
+    addr: "http-echo:8888"
+    type: "http"
+
 apis:
   # gRPC-Web тестирование
   - name: FakeService
@@ -72,3 +78,36 @@ apis:
     methods:
       - name: Check
         auth: {policy: no-need}
+
+  # =========================================================================
+  # HTTP Echo Service - Header Inspection Tests
+  # Returns JSON with all received headers for debugging auth-adapter
+  # =========================================================================
+
+  # Public echo - no auth required (baseline test)
+  - name: EchoPublic
+    cluster: http-echo
+    auth: {policy: no-need}
+    methods:
+      - name: headers
+        auth: {policy: no-need}
+      - name: test
+        auth: {policy: no-need}
+
+  # Protected echo - auth required (should show user-id, session-id headers)
+  - name: EchoProtected
+    cluster: http-echo
+    auth: {policy: required}
+    methods:
+      - name: headers
+        auth: {policy: required}
+      - name: profile
+        auth: {policy: required}
+
+  # Optional auth echo - auth optional (shows headers if authenticated)
+  - name: EchoOptional
+    cluster: http-echo
+    auth: {policy: optional}
+    methods:
+      - name: headers
+        auth: {policy: optional}

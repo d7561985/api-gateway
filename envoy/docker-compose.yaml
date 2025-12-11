@@ -67,6 +67,19 @@ services:
       - "8081:8081"
     networks:
       private:
+
+  # HTTP Echo service - returns all headers in JSON response
+  # Perfect for testing header enrichment from auth-adapter (user-id, session-id)
+  http-echo:
+    image: mendhak/http-https-echo
+    environment:
+      HTTP_PORT: 8888
+      HTTPS_PORT: 9999
+      PRESERVE_HEADER_CASE: "true"
+    ports:
+      - "8888:8888"
+    networks:
+      private:
   opentelemetry:
     build:
       dockerfile: Dockerfile
