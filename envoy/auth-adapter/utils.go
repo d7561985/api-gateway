@@ -44,13 +44,25 @@ func authorize(perm string, roles []*extAuth.Role) bool {
 }
 
 func parsePath(path string) (service string, method string) {
+	// Remove query string if present
+	if idx := strings.Index(path, "?"); idx != -1 {
+		path = path[:idx]
+	}
+
 	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
+	// Expected format: /api/{service}/{method}/...
+	// parts[0] = "", parts[1] = "api", parts[2] = service, parts[3] = method
+	if len(parts) < 4 {
 		return
 	}
 
-	service = parts[len(parts)-2]
-	method = fmt.Sprintf("%s/%s", service, parts[len(parts)-1])
+	// Verify this is an /api/ path
+	if parts[1] != "api" {
+		return
+	}
+
+	service = parts[2]
+	method = fmt.Sprintf("%s/%s", service, parts[3])
 
 	return
 }
