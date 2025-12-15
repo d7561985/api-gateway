@@ -45,8 +45,10 @@ Client Request → API Gateway → auth-adapter → Backend Service
 
 ### ✅ Recently Added Features
 - **🚦 Envoy Rate Limiting**: Full integration of rate limiting configuration into Envoy
-- **❤️ Health Checks**: Active upstream service health monitoring 
+- **❤️ Health Checks**: Active upstream service health monitoring
 - **⚡ Circuit Breaking**: Configurable failure handling and load shedding
+- **🔧 HTTP Routing Fix**: Proper path rewriting for HTTP services (separate from gRPC)
+- **🐛 parsePath Bugfix**: Fixed auth-adapter path parsing for complex URLs with query strings
 
 ### 🚧 Planned Features (Roadmap)  
 - **OPA Policy Engine**: Fine-grained authorization policies
@@ -361,10 +363,25 @@ apis:
 1. **gRPC Services (`type: "grpc"`):**
    - Browser/client → gRPC-Web → API Gateway → HTTP/2 gRPC → Backend
    - Optimized with max_concurrent_streams: 1024, 16MiB windows
-   
+   - Path rewriting: `/api/ServiceName/Method` → `/ServiceName/Method`
+
 2. **HTTP Services (`type: "http"`):**
    - Browser/client → HTTP → API Gateway → HTTP/1.1 → REST API
    - Standard HTTP load balancing without gRPC protocol overhead
+   - **Path rewriting for methods**: `/api/game/calculate` → `/calculate`
+   - **Catch-all regex rewriting**: `/api/game/any/path` → `/any/path`
+
+### HTTP Path Rewriting (NEW)
+
+HTTP services use intelligent path rewriting to strip the API prefix and service name:
+
+| Request Path | Backend Path | Rewrite Method |
+|--------------|--------------|----------------|
+| `/api/game/calculate` | `/calculate` | prefix_rewrite |
+| `/api/game/user/123` | `/user/123` | regex_rewrite |
+| `/api/bonus/progress?userId=x` | `/progress?userId=x` | regex_rewrite |
+
+This allows HTTP backend services to use simple paths without knowing about the gateway's routing structure.
 
 ### Testing Both Protocols
 

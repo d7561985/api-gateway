@@ -207,29 +207,50 @@ grpcurl -plaintext -protoset health.protoset localhost:8080 grpc.health.v1.Healt
 >>> session-id: sess_abc123
 ```
 
-### Quick Verification Script
+### Automated Test Script
+
+A comprehensive test script is provided in the `envoy/` directory:
 
 ```bash
-#!/bin/bash
-PORT=${1:-18080}
-echo "=== Header Enrichment Test Suite (port: $PORT) ==="
+cd envoy
+./test-header-enrichment.sh
+```
 
-echo -e "\n1. Public endpoint (no auth headers expected):"
-curl -s http://localhost:$PORT/api/EchoPublic/test | jq -r '.headers | to_entries | .[] | select(.key | test("user-id|session-id")) | "\(.key): \(.value)"' || echo "  (none found - expected)"
+**What it tests:**
+1. Public endpoint (EchoPublic) - verifies 200 OK without auth headers
+2. Protected endpoint (EchoProtected) - verifies 401 without auth cookie
+3. Optional endpoint (EchoOptional) - verifies 200 OK without auth headers
+4. Lists all headers added by API Gateway (x-forwarded-*, traceparent, etc.)
+5. Optionally tests authenticated requests if `SESSION_COOKIE` is set
 
-echo -e "\n2. Protected endpoint without auth (should return 401):"
-curl -s -w "HTTP Status: %{http_code}\n" http://localhost:$PORT/api/EchoProtected/headers -o /dev/null
+**Testing with authentication:**
+```bash
+# Get a valid session token from your auth service, then:
+SESSION_COOKIE=your-session-token ./test-header-enrichment.sh
+```
 
-echo -e "\n3. Optional endpoint without auth:"
-result=$(curl -s http://localhost:$PORT/api/EchoOptional/headers | jq -r '.headers | to_entries | .[] | select(.key | test("user-id|session-id")) | "\(.key): \(.value)"')
-if [ -z "$result" ]; then
-  echo "  No auth headers (expected without cookie)"
-else
-  echo "$result"
-fi
+**Expected output with valid session:**
+```
+Test 5: Protected endpoint WITH auth cookie
+  Status: 200 OK
+  user-id: 12345
+  session-id: sess_abc123
+```
 
-echo -e "\n4. All headers on public endpoint:"
-curl -s http://localhost:$PORT/api/EchoPublic/headers | jq '.headers | keys'
+### Manual Quick Tests
+
+```bash
+# 1. Public endpoint - should return 200 with no auth headers
+curl -s http://localhost:8080/api/EchoPublic/test | jq '{path: .path, headers: .headers | keys}'
+
+# 2. Protected endpoint without auth - should return 401
+curl -s -w "HTTP Status: %{http_code}\n" http://localhost:8080/api/EchoProtected/headers -o /dev/null
+
+# 3. Optional endpoint - should return 200, no user-id/session-id
+curl -s http://localhost:8080/api/EchoOptional/headers | jq '.headers | {"user-id", "session-id"}'
+
+# 4. Show all Envoy-added headers
+curl -s http://localhost:8080/api/EchoPublic/headers | jq '.headers | to_entries | .[] | select(.key | test("x-envoy|x-forwarded|traceparent"))'
 ```
 
 ### Verifying Auth-Adapter Header Enrichment

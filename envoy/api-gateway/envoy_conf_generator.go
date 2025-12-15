@@ -7,7 +7,8 @@ import (
 )
 
 var (
-	envoyRouteTmpl = template.Must(template.New("routeTmpl").Parse(`
+	// Route template for gRPC - keeps full path (e.g., /api/FakeService/Handle -> /FakeService/Handle)
+	envoyGrpcRouteTmpl = template.Must(template.New("grpcRouteTmpl").Parse(`
               - match: { prefix: "{{.APIRoute}}{{.APIName}}" }
                 route:
                   cluster: {{.ClusterName}}
@@ -16,6 +17,29 @@ var (
                   max_stream_duration:
                     max_stream_duration: 600s
                     grpc_timeout_header_max: 0s
+{{.RateLimitConfig}}
+`))
+
+	// Route template for HTTP - strips service name (e.g., /api/game/calculate -> /calculate)
+	envoyHttpRouteTmpl = template.Must(template.New("httpRouteTmpl").Parse(`
+              - match: { prefix: "{{.APIRoute}}{{.APIName}}" }
+                route:
+                  cluster: {{.ClusterName}}
+                  timeout: 30s
+                  prefix_rewrite: "/{{.MethodName}}"
+{{.RateLimitConfig}}
+`))
+
+	// Fallback for API-level routes (matches /api/game/ prefix)
+	envoyHttpApiRouteTmpl = template.Must(template.New("httpApiRouteTmpl").Parse(`
+              - match: { prefix: "{{.APIRoute}}{{.ServiceName}}/" }
+                route:
+                  cluster: {{.ClusterName}}
+                  timeout: 30s
+                  regex_rewrite:
+                    pattern:
+                      regex: "^{{.APIRoute}}{{.ServiceName}}/(.*)"
+                    substitution: "/\\1"
 {{.RateLimitConfig}}
 `))
 	envoyGrpcClusterTmpl = template.Must(template.New("grpcClusterTmpl").Parse(`
@@ -243,8 +267,16 @@ static_resources:
 )
 
 func GenerateEnvoyConfig(cfg *APIConf, outFile string) error {
+	// Build cluster type map for quick lookup
+	clusterTypes := make(map[string]bool) // true = HTTP, false = gRPC
+	for _, cl := range cfg.Clusters {
+		clusterTypes[cl.Name] = cl.IsHTTP()
+	}
+
 	routesBuf := new(bytes.Buffer)
 	for _, api := range cfg.APIsDescr {
+		isHTTPCluster := clusterTypes[api.Cluster]
+
 		// Generate route for each method with potential rate limiting
 		for _, method := range api.Methods {
 			routePath := api.Name + "/" + method.Name
@@ -272,39 +304,75 @@ func GenerateEnvoyConfig(cfg *APIConf, outFile string) error {
 				rateLimitConfig = rlBuf.String()
 			}
 
+			// Choose template based on cluster type
+			var routeTmpl *template.Template
+			if isHTTPCluster {
+				routeTmpl = envoyHttpRouteTmpl
+			} else {
+				routeTmpl = envoyGrpcRouteTmpl
+			}
+
 			routeData := struct {
 				APIRoute        string
 				APIName         string
+				MethodName      string
+				ServiceName     string
 				ClusterName     string
 				RateLimitConfig string
 			}{
 				APIRoute:        cfg.APIRoute,
 				APIName:         routePath,
+				MethodName:      method.Name,
+				ServiceName:     api.Name,
 				ClusterName:     api.Cluster,
 				RateLimitConfig: rateLimitConfig,
 			}
 
-			err := envoyRouteTmpl.Execute(routesBuf, routeData)
+			err := routeTmpl.Execute(routesBuf, routeData)
 			if err != nil {
 				return err
 			}
 		}
 
-		// Also generate route for the API itself (without method)
-		routeData := struct {
-			APIRoute        string
-			APIName         string
-			ClusterName     string
-			RateLimitConfig string
-		}{
-			APIRoute:        cfg.APIRoute,
-			APIName:         api.Name,
-			ClusterName:     api.Cluster,
-			RateLimitConfig: "", // No rate limiting for API-level routes
-		}
-		err := envoyRouteTmpl.Execute(routesBuf, routeData)
-		if err != nil {
-			return err
+		// Also generate route for the API itself (without method) - catch-all for HTTP
+		if isHTTPCluster {
+			// For HTTP clusters, use regex rewrite to strip service name
+			routeData := struct {
+				APIRoute        string
+				ServiceName     string
+				ClusterName     string
+				RateLimitConfig string
+			}{
+				APIRoute:        cfg.APIRoute,
+				ServiceName:     api.Name,
+				ClusterName:     api.Cluster,
+				RateLimitConfig: "",
+			}
+			err := envoyHttpApiRouteTmpl.Execute(routesBuf, routeData)
+			if err != nil {
+				return err
+			}
+		} else {
+			// For gRPC clusters, keep original behavior
+			routeData := struct {
+				APIRoute        string
+				APIName         string
+				MethodName      string
+				ServiceName     string
+				ClusterName     string
+				RateLimitConfig string
+			}{
+				APIRoute:        cfg.APIRoute,
+				APIName:         api.Name,
+				MethodName:      "",
+				ServiceName:     api.Name,
+				ClusterName:     api.Cluster,
+				RateLimitConfig: "",
+			}
+			err := envoyGrpcRouteTmpl.Execute(routesBuf, routeData)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
