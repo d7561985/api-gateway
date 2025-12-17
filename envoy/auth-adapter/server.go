@@ -180,24 +180,25 @@ func (s *server) Check(ctx context.Context, in *envoy_service_auth_v3.CheckReque
 			return formCheckResponse(v3.StatusCode_PreconditionFailed, "", respHeaders), nil
 		}
 	}
-	if reqPermission.NoNeed() {
-		return formCheckResponse(0, "", respHeaders), nil
-	}
-
+	// Always parse token first - even for no-need/optional policies
+	// If token is present, we MUST validate it and enrich headers
 	token, err := parseTokenCookie(headers["cookie"])
 	s.logger.Debug("token", tel.String("token", token), tel.Error(err))
 	if err != nil {
 		return formCheckResponse(v3.StatusCode_BadRequest, err.Error(), respHeaders), nil
 	}
 
-	if token == "" && reqPermission.Optional() {
+	// No token provided
+	if token == "" {
+		if reqPermission.Required() {
+			return formCheckResponse(v3.StatusCode_Unauthorized, "token required", respHeaders), nil
+		}
+		// NoNeed or Optional without token - allow through
 		return formCheckResponse(0, "", respHeaders), nil
 	}
-	if token == "" && reqPermission.Required() {
-		return formCheckResponse(v3.StatusCode_Unauthorized, "token required", respHeaders), nil
-	}
 
-	// validate session
+	// Token IS provided - ALWAYS validate it regardless of policy!
+	// This ensures: 1) invalid tokens are cleared, 2) valid tokens enrich headers
 	req := &extAuth.ValidateSessionRequest{
 		SessionToken: token,
 	}
@@ -210,12 +211,14 @@ func (s *server) Check(ctx context.Context, in *envoy_service_auth_v3.CheckReque
 	s.logger.Debug("AuthService", tel.Any("response", resp), tel.Error(err))
 
 	if err != nil {
+		// Token is invalid - clear the cookie
 		respHeaders = append(respHeaders, &envoy_api_v3_core.HeaderValueOption{
 			Header: &envoy_api_v3_core.HeaderValue{Key: "set-cookie", Value: "token=; Path=/; Max-Age=0; HttpOnly"},
 			Append: &wrappers.BoolValue{Value: false},
 		})
 
-		if reqPermission.Optional() {
+		// For NoNeed or Optional - allow through even with invalid token
+		if reqPermission.NoNeed() || reqPermission.Optional() {
 			return formCheckResponse(0, "", respHeaders), nil
 		}
 
